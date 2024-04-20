@@ -1,0 +1,6 @@
+name: heifer
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: HeifER is a microservice for provisioning the Databricks cluster, Azure Data Factory, and pipeline code management.

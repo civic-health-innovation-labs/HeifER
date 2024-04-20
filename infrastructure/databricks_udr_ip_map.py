@@ -1,0 +1,25 @@
+# Databricks cluster needs to have the following IPs whitelisted
+DATABRICKS_UDR_IP_MAP: dict[str, str] = {
+    "australiacentral": "20.53.145.128/28",
+    "brazilsouth": "20.197.222.144/28",
+    "canadacentral": "52.139.4.160/28",
+    "centralindia": "20.193.246.208/28",
+    "centralus": "20.57.106.0/28",
+    "eastasia": "20.195.104.64/28",
+    "eastasia0": "20.239.100.80/28",
+    "francecentral": "20.74.69.128/28",
+    "germanywestcentral": "20.52.93.40/29",
+    "japaneast": "20.78.226.176/28",
+    "koreacentral": "20.194.107.48/28",
+    "northeurope": "20.73.215.48/28",
+    "norwayeast": "51.13.86.224/28",
+    "southafricanorth": "102.133.192.48/28",
+    "southcentralus": "13.91.84.96/28",
+    "swedencentral": "20.91.164.16/28",
+    "switzerlandnorth": "51.103.172.176/28",
+    "switzerlandwest": "51.107.233.80/28",
+    "uaenorth": "40.120.89.0/28",
+    "uksouth": "51.141.64.128/28",
+    "westcentralus": "52.161.34.0/28",
+    "westus3": "20.125.82.0/28"
+}

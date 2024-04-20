@@ -1,0 +1,10 @@
+# Basic dependencies
+pulumi>=3.0.0,<4.0.0
+pulumi-azure-native>=2.0.0,<3.0.0
+pulumi-azure>=5.58.0,<6.0.0
+# To implement waiting
+pulumiverse-time>=0.0.16
+# For cluster management
+pulumi_databricks>=1.27.1
+# For service principals
+pulumi-azuread>=5.47.0

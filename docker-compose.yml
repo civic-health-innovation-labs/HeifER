@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  pulumi:
+    build:
+      dockerfile: pulumi-docker/Dockerfile
+      context: .
+    environment:
+      - AZURE_TENANT_ID=71c35f80-28a0-4c98-8472-f29f22f6614d
+      - PULUMI_BACKEND_URL=azblob://heiferinfradev?storage_account=heiferinfra
+      - PULUMI_CONFIG_PASSPHRASE=lb1eQTXnIvjAdqYqc5NO
+    volumes:
+      - ./infrastructure:/src/
+      - ./pipelines:/pipelines/
