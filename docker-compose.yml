@@ -8,7 +8,7 @@ services:
     environment:
       - AZURE_TENANT_ID=TODO_FILL_TENANT_ID
       - PULUMI_BACKEND_URL=azblob://TODO_FILL_BLOB_CONTAINER_NAME?storage_account=TODO_FILL_STORAGE_ACCOUNT_NAME
-      - PULUMI_CONFIG_PASSPHRASE=TODO_FILL_SOME_RANDOM_VALU
+      - PULUMI_CONFIG_PASSPHRASE=TODO_FILL_SOME_RANDOM_VALUE
     volumes:
       - ./infrastructure:/src/
       - ./pipelines:/pipelines/
