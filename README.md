@@ -95,6 +95,9 @@ make artifacts
 this needs to be run whenever you do any changes in the pipeline
 codebase.
 
+The template for the pipeline structure is available
+in the repository [PipeLINES](https://github.com/civic-health-innovation-labs/PipeLINES)
+
 ### Building stack (environment)
 Once you set up all the variables and have pipelines ready, run:
 ```bash
