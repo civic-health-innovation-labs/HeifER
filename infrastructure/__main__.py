@@ -1,6 +1,5 @@
 import pathlib
 import json
-from typing import Optional, Any
 
 import pulumi  # noqa
 import pulumi_azure  # TODO: Consider migrating to native
@@ -10,92 +9,10 @@ import pulumi_databricks
 import pulumi_azuread
 
 from databricks_udr_ip_map import DATABRICKS_UDR_IP_MAP
-
-
-# ======= CONFIGURATION =======
-class HeiferConfig:
-    """Main configuration class. Contains mainly names of resources and generic configuration.
-
-    Warning:
-        Names for resources needs to reflects limitations presented:
-      https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules
-    Note:
-        Many other configuration variables are included in HeiferClusterConfig class.
-    """
-    # Location of the services (typically uksouth)
-    AZURE_LOCATION: str = "TODO: FILL"
-    # Resource group name (where things are deployed)
-    RESOURCE_GROUP: str = "TODO: FILL"
-    # Storage Account name for Bronze/Silver/Gold (or similar) layers
-    #   Note that name for storage account is restricted: up to 24 alphanumeric chars, no hyphens
-    STORAGE_ACCOUNT_NAME: str = "TODO: FILL"
-    # Concrete layers (containers) present in the storage account (typically bronze, silver, gold)
-    #   Warning: this value cannot be changed easily (have functional impacts)
-    STORAGE_ACCOUNT_LAYERS: set[str] = {'bronze', 'silver', 'gold', 'libraries'}
-    # Databricks workspace name
-    DATABRICKS_WORKSPACE_NAME: str = "TODO: FILL"
-    # Managed resource group name for Databricks
-    DATABRICKS_MANAGED_RESOURCE_GROUP_NAME: str = "TODO: FILL"
-    # Databricks secret scope name
-    DATABRICKS_SECRET_SCOPE_NAME: str = "TODO: FILL"
-    # Storage account name for Databricks filesystem (unique), is created by Databricks
-    #   Note that name for storage account is restricted: up to 24 alphanumeric chars, no hyphens
-    DATABRICKS_DFS_STORAGE_ACCOUNT_NAME: str = "TODO: FILL"
-    # Account ID of the Databricks user for setting up provider
-    # TODO: needs to be set up after the workspace is created. To find it go to Account Console
-    #   (Manage Account) from inside workspace, then click on your name (right top corner).
-    DATABRICKS_ACCOUNT_ID: Optional[str] = None
-    # Unique UUID for the app registration for the Service Principal linking ADF and Workspace
-    #   TODO: Find in ADF -> Properties (caption 'Managed Identity Application ID')
-    DATABRICKS_SERVICE_PRINCIPAL_FOR_ADF_APP_UUID: Optional[str] = None
-    # Azure Data Factory name
-    AZURE_DATA_FACTORY_NAME: str = "TODO: FILL"
-    # Name of the main Heifers virtual network
-    VIRTUAL_NETWORK_NAME: str = "TODO: FILL"
-    # Network address prefix for virtual network (must differs from others)
-    VIRTUAL_NETWORK_ADDRESS_SPACE: str = "10.40.0.0/22"
-    # There is a need to define subnets for shared, databricks host, and databricks container.
-    #   - use any online Subnet Calculator to find a plausible values.
-    VIRTUAL_NETWORK_SUBNETS_ADDRESS_SPACES: dict[str, str] = {
-        "shared_subnet": "10.40.0.0/24",
-        "databricks_host_subnet": "10.40.1.0/24",
-        "databricks_container_subnet": "10.40.2.0/24",
-    }
-    # Path to directory with pipelines from inside Docker (DO NOT CHANGE UNLESS YOU KNOW)
-    PATH_TO_PIPELINES: pathlib.Path = pathlib.Path("../pipelines")
-    # This is the relative path to folder which content is upload as files to DBFS.
-    #   (DO NOT CHANGE UNLESS YOU KNOW)
-    PATH_TO_PIPELINES_UPLOAD_FOLDER: pathlib.Path = pathlib.Path("artifacts")
-    # Decide whether to upload libraries (artifacts content)
-    # TODO: Set to False on the first round, add your IP exception to the Storage Account Firewall
-    #  rules before running. Also, check if the content of files is not empty (like __init__.py)
-    UPLOAD_LIBRARIES: bool = False
-
-
-class HeiferClusterConfiguration:
-    """Configuration for the Spark (PySpark) job cluster.
-    Note:
-        To see the configuration options for Pulumi, visit the website:
-https://www.pulumi.com/registry/packages/azure/api-docs/datafactory/linkedserviceazuredatabricks/
-    """
-    # Spark version, as an output of: pulumi_databricks.get_spark_version()
-    CLUSTER_VERSION: str = "14.2.x-scala2.12"
-    # Define auto scaling option for the cluster (minimum and maximum workers)
-    MIN_NUMBER_OF_WORKERS: int = 2
-    MAX_NUMBER_OF_WORKERS: int = 8
-    # Node type ID as an output of the command:
-    # pulumi_databricks.get_node_type(category='General Purpose', min_memory_gb=16, min_cores=4,
-    #                                 photon_driver_capable=True, photon_worker_capable=True)
-    NODE_TYPE: str = "Standard_D4as_v5"
-    # Location for storing cluster's logs (must be in DBFS)
-    LOG_DESTINATION: Optional[str] = "dbfs:/heifer_logs"
-    # Secrets definition for Spark cluster, follows the logic:
-    #   https://learn.microsoft.com/en-us/azure/databricks/security/secrets/secrets
-    #   ones listed here are merged with system ones later (in cluster definition)
-    SPARK_CONFIG: Optional[dict[str, Any]] = {
-        # TODO: FILL
-    }
-# =============================
+from config_heifer import HeiferConfig, HeiferClusterConfiguration
+from config_rio import RioPipelineConfig
+from config_bak_unzip_pipeline import BakUnzipPipelineConfig
+from config_dataset_provisioning import DatasetProvisioningPipelineConfig
 
 
 # -- Get information about current client (person who is deploying, probably you) --
@@ -146,17 +63,18 @@ for _directory in HeiferConfig.PATH_TO_PIPELINES.iterdir():
     if _directory.is_dir():
         if (_directory / "pipelines").is_dir():
             for _pipeline in (_directory / "pipelines").iterdir():
-                if (pipeline_file := (_pipeline / "pipeline.json")).is_file():
+                if (pipeline_file := (_pipeline / "pipeline.json")).is_file():  # noqa: E231, E203
                     pipelines_definitions.append(json.load(pipeline_file.open('r')))
                     # Iteration for each file to be uploaded
-                    for _artifact_file in (_pipeline /
-                                           HeiferConfig.PATH_TO_PIPELINES_UPLOAD_FOLDER).iterdir():
+                    for _artifact_file in (
+                            _pipeline / HeiferConfig.PATH_TO_PIPELINES_UPLOAD_FOLDER
+                    ).iterdir():
                         if _artifact_file.is_file():
                             upload_files_paths.append(
                                 {
                                     "local_path": str(_artifact_file),
                                     "abfss_path": str(
-                                            pathlib.Path(_pipeline.name) / _artifact_file.name
+                                        pathlib.Path(_pipeline.name) / _artifact_file.name
                                     )
                                 }
                             )
@@ -191,7 +109,7 @@ if HeiferConfig.UPLOAD_LIBRARIES:
 heifer_adf = pulumi_azure.datafactory.Factory(
     resource_name=HeiferConfig.AZURE_DATA_FACTORY_NAME,
     name=HeiferConfig.AZURE_DATA_FACTORY_NAME,
-    managed_virtual_network_enabled=True,  # TODO: once supported in Pulumi Native, migrate
+    managed_virtual_network_enabled=True,
     resource_group_name=heifer_rg.name,
     location=heifer_rg.location,
     identity=pulumi_azure.datafactory.FactoryIdentityArgs(type="SystemAssigned"),
@@ -225,7 +143,7 @@ for _route_name, _address_prefix in {
     "heifer-sql": "Sql",
     "heifer-storage": "Storage",
     "heifer-eventhub": "EventHub"
-  }.items():
+}.items():
     heifer_databricks_route = azure_native.network.Route(
         resource_name=_route_name,
         address_prefix=_address_prefix,
@@ -238,15 +156,16 @@ for _route_name, _address_prefix in {
 
 
 # -- Routes for Databricks UDR IP --
-for _location_name, _ip_value in DATABRICKS_UDR_IP_MAP.items():
-    heifer_databricks_ip_route = azure_native.network.Route(
-        resource_name=f"heifer-location-{_location_name}",
-        route_table_name=heifer_databricks_route_table.name,
-        address_prefix=_ip_value,
-        next_hop_type="Internet",
-        resource_group_name=heifer_rg.name,
-        route_name=f"heifer-location-{_location_name}",
-    )
+for _location_name, _ip_values in DATABRICKS_UDR_IP_MAP.items():
+    for _ip_idx, _ip_value in enumerate(_ip_values):
+        heifer_databricks_ip_route = azure_native.network.Route(
+            resource_name=f"heifer-location-{_location_name}-{_ip_idx}",
+            route_table_name=heifer_databricks_route_table.name,
+            address_prefix=_ip_value,
+            next_hop_type="Internet",
+            resource_group_name=heifer_rg.name,
+            route_name=f"heifer-location-{_location_name}-{_ip_idx}",
+        )
 # --------------------------------------------
 
 
@@ -270,6 +189,10 @@ heifer_shared_subnet = azure_native.network.Subnet(
     resource_group_name=heifer_rg.name,
     address_prefix=HeiferConfig.VIRTUAL_NETWORK_SUBNETS_ADDRESS_SPACES["shared_subnet"],
     virtual_network_name=heifer_virtual_network.name,
+
+    network_security_group=azure_native.network.NetworkSecurityGroupArgs(
+        id=heifer_databricks_network_security_group.id
+    ),
     route_table=azure_native.network.RouteTableArgs(id=heifer_databricks_route_table.id),
 )
 # --------------------------------
@@ -536,7 +459,11 @@ heifer_service_principal_for_databricks_storage_account = pulumi_azuread.Service
 # D) Assign Contributor privilege on the Storage for the Service Principal
 heifer_perm_service_principal_can_contribute_storage = azure_native.authorization.RoleAssignment(
     resource_name='heifer-perm-service-principal-can-contribute-storage',
-    principal_id=heifer_service_principal_for_databricks_storage_account.id,
+    principal_id=heifer_service_principal_for_databricks_storage_account.id.apply(
+        lambda _pr: str(_pr)[len("/servicePrincipals/"):]
+        if str(_pr).startswith("/servicePrincipals/")
+        else str(_pr)
+    ),
     principal_type=azure_native.authorization.PrincipalType.SERVICE_PRINCIPAL,
     # role_definition_name='Storage Blob Data Contributor',
     role_definition_id=f"/subscriptions/{CURRENT_CLIENT.subscription_id}/providers/"
@@ -653,9 +580,90 @@ heifer_link_adf_databricks = pulumi_azure.datafactory.LinkedServiceAzureDatabric
 # ------------------------------------------------------------------
 
 
+# ==== DEPLOY PIPELINE TO UNZIP FILES ====
+if BakUnzipPipelineConfig.DEPLOY_PIPELINE:
+    heifer_bak_unzipped_linked_service = pulumi_azure.datafactory.LinkedServiceAzureBlobStorage(
+        resource_name="unzippedbakstrg",
+        name="unzippedbakstrg",
+        data_factory_id=heifer_adf.id,
+        service_endpoint=f"https://{BakUnzipPipelineConfig.PRE_BRONZE_STORAGE_ACCOUNT}.blob.core.windows.net",  # noqa: E501
+        use_managed_identity=True,
+        opts=pulumi.ResourceOptions(
+            depends_on=[heifer_adf,
+                        heifer_private_endpoint_databricks_filesystem,
+                        heifer_databricks_workspace,
+                        heifer_service_principal_adf,
+                        heifer_perm_service_principal_can_contribute_storage,
+                        heifer_adf_serpr_role_assignment],
+            custom_timeouts=pulumi.CustomTimeouts(create="30m", update="30m", delete="30m"),
+        )
+    )
+
+    heifer_bak_zipped_linked_service = pulumi_azure.datafactory.LinkedServiceAzureBlobStorage(
+        resource_name="zippedbakstrg",
+        name="zippedbakstrg",
+        data_factory_id=heifer_adf.id,
+        service_endpoint=f"https://{BakUnzipPipelineConfig.PRE_BRONZE_STORAGE_ACCOUNT}.blob.core.windows.net",  # noqa: E501
+        use_managed_identity=True,
+        opts=pulumi.ResourceOptions(
+            depends_on=[heifer_adf,
+                        heifer_private_endpoint_databricks_filesystem,
+                        heifer_databricks_workspace,
+                        heifer_service_principal_adf,
+                        heifer_perm_service_principal_can_contribute_storage,
+                        heifer_adf_serpr_role_assignment],
+            custom_timeouts=pulumi.CustomTimeouts(create="30m", update="30m", delete="30m"),
+        )
+    )
+
+    heifer_zipped_bak_dataset = pulumi_azure.datafactory.DatasetBinary(
+        resource_name="zippedbakds",
+        name="zippedbakds",
+        data_factory_id=heifer_adf.id,
+        linked_service_name=heifer_bak_zipped_linked_service.name,
+        azure_blob_storage_location=pulumi_azure.datafactory.DatasetBinaryAzureBlobStorageLocationArgs(  # noqa: E501
+            container=BakUnzipPipelineConfig.PRE_BRONZE_ZIPPED_BAK_DATASET_CONTAINER,
+            filename=BakUnzipPipelineConfig.PRE_BRONZE_ZIPPED_BAK_DATASET_FILE_NAME,
+        ),
+        compression=pulumi_azure.datafactory.DatasetBinaryCompressionArgs(
+            type="ZipDeflate"
+        )
+    )
+
+    heifer_unzipped_bak_dataset = pulumi_azure.datafactory.DatasetBinary(
+        resource_name="unzippedbakds",
+        name="unzippedbakds",
+        data_factory_id=heifer_adf.id,
+        linked_service_name=heifer_bak_unzipped_linked_service.name,
+        azure_blob_storage_location=pulumi_azure.datafactory.DatasetBinaryAzureBlobStorageLocationArgs(  # noqa: E501
+            container=BakUnzipPipelineConfig.PRE_BRONZE_UNZIPPED_BAK_DATASET_CONTAINER,
+            path=BakUnzipPipelineConfig.PRE_BRONZE_UNZIPPED_BAK_DATASET_FOLDER_PATH,
+        ),
+    )
+# ----------------------------------------
+
+
 # ====== DATA FACTORY AND PIPELINE PROVISIONING ======
 # -- Deploy all available pipelines --
+heifer_adf_pipeline_dependencies = [heifer_200_seconds_break, heifer_link_adf_databricks]
+if BakUnzipPipelineConfig.DEPLOY_PIPELINE:
+    heifer_adf_pipeline_dependencies.append(heifer_zipped_bak_dataset)
+    heifer_adf_pipeline_dependencies.append(heifer_unzipped_bak_dataset)
+
 for _pipeline_definition in pipelines_definitions:
+    if (
+            not BakUnzipPipelineConfig.DEPLOY_PIPELINE
+            and _pipeline_definition['name'] == BakUnzipPipelineConfig.PIPELINE_NAME
+    ) or (
+            not RioPipelineConfig.DEPLOY_PIPELINE
+            and _pipeline_definition['name'] == RioPipelineConfig.PIPELINE_NAME
+    ) or (
+            not DatasetProvisioningPipelineConfig.DEPLOY_PIPELINE
+            and _pipeline_definition['name'] == DatasetProvisioningPipelineConfig.PIPELINE_NAME
+    ):
+        # Skip BAK ingestion pipeline if not required
+        continue
+
     heifer_adf_pipeline = pulumi_azure.datafactory.Pipeline(
         resource_name=f"heifer-adf-pipeline-{_pipeline_definition['name']}",
         name=_pipeline_definition['name'],
@@ -667,7 +675,6 @@ for _pipeline_definition in pipelines_definitions:
             for _pipeline_parameter_name, _pipeline_parameter_definition in
             _pipeline_definition['properties']['parameters'].items()
         },
-        opts=pulumi.ResourceOptions(depends_on=[heifer_200_seconds_break,
-                                                heifer_link_adf_databricks]),
+        opts=pulumi.ResourceOptions(depends_on=heifer_adf_pipeline_dependencies),
     )
 # ------------------------------------

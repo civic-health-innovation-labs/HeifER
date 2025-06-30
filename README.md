@@ -86,6 +86,11 @@ variables need to be left empty for the first round of stack
 
 Because you probably do not know the values in advance.
 
+Once you run the first round of deployment (without the values mentioned
+above), you need to add your IP as an exception into the container
+`STORAGE_ACCOUNT_NAME`, as you need to access it from the VM that
+runs Pulumi. Be careful to remove this exception afterwards.
+
 ### Managing pipelines
 Copy your pipeline repository into `/pipelines` folder. Then build
 artifacts from inside Docker container, using:
@@ -94,9 +99,6 @@ make artifacts
 ```
 this needs to be run whenever you do any changes in the pipeline
 codebase.
-
-The template for the pipeline structure is available
-in the repository [PipeLINES](https://github.com/civic-health-innovation-labs/PipeLINES)
 
 ### Building stack (environment)
 Once you set up all the variables and have pipelines ready, run:
@@ -109,8 +111,7 @@ Logic is smart enough to do reflect on changes only.
 
 Be aware that the name of the `linkedServiceName` in each
 `pipeline.json` needs to match the name of the
-`heifer_link_adf_databricks` resource. Also, be aware that the
-path to the library must match.
+`heifer_link_adf_databricks` resource.
 
 ## Generic notes
 Full documentation of underpinning Terraform Databricks provider:
@@ -120,3 +121,7 @@ How to set up the secret for the `.yaml` files:
 ```bash
 pulumi config set databricks:azureClientSecret "SECRET_VALUE" --secret
 ```
+
+## Pipeline for unzipping BAK and unloading it to Microsoft SQL Server Managed Instance
+
+![alt text](assets-docs/bakpipeline.png)
