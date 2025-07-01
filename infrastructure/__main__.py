@@ -535,7 +535,8 @@ heifer_databricks_secret_scope = pulumi_databricks.SecretScope(
     resource_name=HeiferConfig.DATABRICKS_SECRET_SCOPE_NAME,
     name=HeiferConfig.DATABRICKS_SECRET_SCOPE_NAME,
     opts=pulumi.ResourceOptions(
-        depends_on=[heifer_adf_integration_runtime],
+        depends_on=[heifer_adf_integration_runtime,
+                    heifer_service_principal_adf],
         provider=heifer_databricks_provider,
     ),
 )
