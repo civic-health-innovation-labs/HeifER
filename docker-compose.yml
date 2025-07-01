@@ -5,10 +5,6 @@ services:
     build:
       dockerfile: pulumi-docker/Dockerfile
       context: .
-    environment:
-      - AZURE_TENANT_ID=__TODO_FILL_ME_IN__
-      - PULUMI_BACKEND_URL=azblob://__TODO_FILL_ME_IN__?storage_account=__TODO_FILL_ME_IN__
-      - PULUMI_CONFIG_PASSPHRASE=__TODO_FILL_ME_IN__
     volumes:
       - ./infrastructure:/src/
       - ./pipelines:/pipelines/

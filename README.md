@@ -29,7 +29,7 @@ From now on, use docker-compose environment to operate with the state.
 It uses docker-compose, so make sure you have it installed and configured.
 
 ### Configure environment
-Go to the `docker-compose.yml` file and configure the environmental variables:
+First, after getting into the Docker environment, set the following environmental variables:
  - `AZURE_TENANT_ID`: Set it to Azure Tenant where things are to be deployed.
  - `PULUMI_BACKEND_URL`: Set it to `azblob://BLOB_NAME?storage_account=STORAGE_ACOUNT`
     and replace `BLOB_NAME` and `STORAGE_ACOUNT` with values from the previous step.
@@ -151,4 +151,3 @@ The pipeline logically follows the flow depicted in the diagram:
 
 ## In-situ Fix for the Databricks File System (DBFS) Issue
 Go to the `pe-heifer-databricks-filesystem` Private Endpoint resource. Click **Settings** > **DNS configuration**. Then, at the top, click **Add configuration** and select the appropriate DNS zone (deployed in the same resource group as the private endpoint).
-
