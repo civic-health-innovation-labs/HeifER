@@ -64,7 +64,7 @@ for _directory in HeiferConfig.PATH_TO_PIPELINES.iterdir():
         if (_directory / "pipelines").is_dir():
             for _pipeline in (_directory / "pipelines").iterdir():
                 if (pipeline_file := (_pipeline / "pipeline.json")).is_file():  # noqa: E231, E203
-                    _pipeline_file_def: str = json.load(pipeline_file.open('r'))
+                    _pipeline_file_def: str = pipeline_file.open('r').read()
                     _pipeline_file_def = _pipeline_file_def.replace(
                         # TODO: This may differ in your logic
                         r'__CONTAINER_NAME__', r'libraries'
@@ -72,7 +72,7 @@ for _directory in HeiferConfig.PATH_TO_PIPELINES.iterdir():
                     _pipeline_file_def = _pipeline_file_def.replace(
                         r'__STORAGE_ACCOUNT_NAME__', HeiferConfig.STORAGE_ACCOUNT_NAME
                     )
-                    pipelines_definitions.append(_pipeline_file_def)
+                    pipelines_definitions.append(json.loads(_pipeline_file_def))
                     # Iteration for each file to be uploaded
                     for _artifact_file in (
                             _pipeline / HeiferConfig.PATH_TO_PIPELINES_UPLOAD_FOLDER
