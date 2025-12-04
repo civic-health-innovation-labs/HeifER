@@ -8,11 +8,12 @@ import pulumiverse_time
 import pulumi_databricks
 import pulumi_azuread
 
-from databricks_udr_ip_map import DATABRICKS_UDR_IP_MAP
-from config_heifer import HeiferConfig, HeiferClusterConfiguration
-from config_rio import RioPipelineConfig
-from config_bak_unzip_pipeline import BakUnzipPipelineConfig
-from config_dataset_provisioning import DatasetProvisioningPipelineConfig
+from configurations.databricks_udr_ip_map import DATABRICKS_UDR_IP_MAP
+from configurations.config_heifer import HeiferConfig, HeiferClusterConfiguration
+from configurations.config_rio import RioPipelineConfig
+from configurations.config_bak_unzip_pipeline import BakUnzipPipelineConfig
+from configurations.config_dataset_provisioning import DatasetProvisioningPipelineConfig
+from configurations.config_bak_serialization_distribution import BakSerializationDistributionConfig
 
 
 # -- Get information about current client (person who is deploying, probably you) --
@@ -424,179 +425,156 @@ if not HeiferConfig.DATABRICKS_ACCOUNT_ID or \
     # The following code does not make sense to run till the DATABRICKS_ACCOUNT_ID is set.
     pulumi.export("Warning", "You need to set up the DATABRICKS_ACCOUNT_ID and "
                              "DATABRICKS_SERVICE_PRINCIPAL_FOR_ADF_APP_UUID variable")
-    exit(0)
+else:
+    # -- Assign role to the ADF's Service Principal to allow cluster creation --
+    heifer_adf_serpr_role_assignment = azure_native.authorization.RoleAssignment(
+        resource_name='heifer-adf-serpr-role-assignment',
+        principal_id=HeiferConfig.DATABRICKS_SERVICE_PRINCIPAL_FOR_ADF_APP_UUID,
+        principal_type=azure_native.authorization.PrincipalType.SERVICE_PRINCIPAL,
+        # role_definition_name='Contributor',
+        role_definition_id=f"/subscriptions/{CURRENT_CLIENT.subscription_id}/providers/"
+                           f"Microsoft.Authorization/roleDefinitions/"
+                           f"b24988ac-6180-42a0-ab88-20f7382dd24c",  # Contributor GUID
+        scope=heifer_databricks_workspace.id,
+        opts=pulumi.ResourceOptions(
+            depends_on=[heifer_databricks_workspace, heifer_adf]
+        ),
+    )
+    # --------------------------------------------------------------------------
 
 
-# -- Assign role to the ADF's Service Principal to allow cluster creation --
-heifer_adf_serpr_role_assignment = azure_native.authorization.RoleAssignment(
-    resource_name='heifer-adf-serpr-role-assignment',
-    principal_id=HeiferConfig.DATABRICKS_SERVICE_PRINCIPAL_FOR_ADF_APP_UUID,
-    principal_type=azure_native.authorization.PrincipalType.SERVICE_PRINCIPAL,
-    # role_definition_name='Contributor',
-    role_definition_id=f"/subscriptions/{CURRENT_CLIENT.subscription_id}/providers/"
-                       f"Microsoft.Authorization/roleDefinitions/"
-                       f"b24988ac-6180-42a0-ab88-20f7382dd24c",  # Contributor GUID
-    scope=heifer_databricks_workspace.id,
-    opts=pulumi.ResourceOptions(
-        depends_on=[heifer_databricks_workspace, heifer_adf]
-    ),
-)
-# --------------------------------------------------------------------------
+    # -- Create Service Principal with Storage Blob Data Contributor access to Storage Account --
+    # A) Azure requires Application Registration for principals
+    heifer_app_for_databricks_storage_account = pulumi_azuread.ApplicationRegistration(
+        resource_name="heifer-app-for-databricks-storage-account",
+        display_name="heifer-app-for-databricks-storage-account",
+    )
+    # B) To define client_secret value of the principal
+    heifer_app_for_databricks_storage_account_password = pulumi_azuread.ApplicationPassword(
+        resource_name="heifer-app-for-databricks-storage-account-password",
+        application_id=heifer_app_for_databricks_storage_account.id
+    )
+    # C) Actual service principal definition
+    heifer_service_principal_for_databricks_storage_account = pulumi_azuread.ServicePrincipal(
+        resource_name="heifer-service-principal-for-databricks-storage-account",
+        client_id=heifer_app_for_databricks_storage_account.client_id,
+        owners=[CURRENT_CLIENT.object_id],
+        opts=pulumi.ResourceOptions(
+            depends_on=[heifer_app_for_databricks_storage_account]
+        ),
+    )
+    # D) Assign Contributor privilege on the Storage for the Service Principal
+    heifer_perm_service_principal_can_contribute_storage = azure_native.authorization.RoleAssignment(
+        resource_name='heifer-perm-service-principal-can-contribute-storage',
+        principal_id=heifer_service_principal_for_databricks_storage_account.id.apply(
+            lambda _pr: str(_pr)[len("/servicePrincipals/"):]
+            if str(_pr).startswith("/servicePrincipals/")
+            else str(_pr)
+        ),
+        principal_type=azure_native.authorization.PrincipalType.SERVICE_PRINCIPAL,
+        # role_definition_name='Storage Blob Data Contributor',
+        role_definition_id=f"/subscriptions/{CURRENT_CLIENT.subscription_id}/providers/"
+                           f"Microsoft.Authorization/roleDefinitions/"
+                           f"ba92f5b4-2d11-453d-a403-e96b0029c9fe",  # Storage Bl. Dt. Contr. GUID
+        scope=heifer_storage_account.id,
+        opts=pulumi.ResourceOptions(
+            depends_on=[heifer_service_principal_for_databricks_storage_account,
+                        heifer_200_seconds_break]
+        ),
+    )
+    # -------------------------------------------------------------------
 
 
-# -- Create Service Principal with Storage Blob Data Contributor access to Storage Account --
-# A) Azure requires Application Registration for principals
-heifer_app_for_databricks_storage_account = pulumi_azuread.ApplicationRegistration(
-    resource_name="heifer-app-for-databricks-storage-account",
-    display_name="heifer-app-for-databricks-storage-account",
-)
-# B) To define client_secret value of the principal
-heifer_app_for_databricks_storage_account_password = pulumi_azuread.ApplicationPassword(
-    resource_name="heifer-app-for-databricks-storage-account-password",
-    application_id=heifer_app_for_databricks_storage_account.id
-)
-# C) Actual service principal definition
-heifer_service_principal_for_databricks_storage_account = pulumi_azuread.ServicePrincipal(
-    resource_name="heifer-service-principal-for-databricks-storage-account",
-    client_id=heifer_app_for_databricks_storage_account.client_id,
-    owners=[CURRENT_CLIENT.object_id],
-    opts=pulumi.ResourceOptions(
-        depends_on=[heifer_app_for_databricks_storage_account]
-    ),
-)
-# D) Assign Contributor privilege on the Storage for the Service Principal
-heifer_perm_service_principal_can_contribute_storage = azure_native.authorization.RoleAssignment(
-    resource_name='heifer-perm-service-principal-can-contribute-storage',
-    principal_id=heifer_service_principal_for_databricks_storage_account.id.apply(
-        lambda _pr: str(_pr)[len("/servicePrincipals/"):]
-        if str(_pr).startswith("/servicePrincipals/")
-        else str(_pr)
-    ),
-    principal_type=azure_native.authorization.PrincipalType.SERVICE_PRINCIPAL,
-    # role_definition_name='Storage Blob Data Contributor',
-    role_definition_id=f"/subscriptions/{CURRENT_CLIENT.subscription_id}/providers/"
-                       f"Microsoft.Authorization/roleDefinitions/"
-                       f"ba92f5b4-2d11-453d-a403-e96b0029c9fe",  # Storage Bl. Dt. Contr. GUID
-    scope=heifer_storage_account.id,
-    opts=pulumi.ResourceOptions(
-        depends_on=[heifer_service_principal_for_databricks_storage_account,
-                    heifer_200_seconds_break]
-    ),
-)
-# -------------------------------------------------------------------
+    # -- Databricks Service Principal for ADF --
+    heifer_service_principal_adf = pulumi_databricks.ServicePrincipal(
+        resource_name="serpr-heifer-databricks-adf",
+        application_id=HeiferConfig.DATABRICKS_SERVICE_PRINCIPAL_FOR_ADF_APP_UUID,
+        # external_id=heifer_adf.identity.apply(lambda _identity: _identity['principal_id']),
+        # acl_principal_id=heifer_adf.identity.apply(lambda _identity: _identity['principal_id']),
+        display_name=f"Service Principal of Heifer ADF",
+        allow_cluster_create=True,
+        allow_instance_pool_create=True,
+        workspace_access=True,
+
+        opts=pulumi.ResourceOptions(
+            depends_on=[heifer_private_endpoint_databricks_control_plane,
+                        heifer_private_endpoint_databricks_filesystem,
+                        heifer_databricks_workspace,
+                        heifer_databricks_provider],
+            provider=heifer_databricks_provider
+        ),
+    )
+    # ------------------------------------------
 
 
-# -- Databricks Service Principal for ADF --
-heifer_service_principal_adf = pulumi_databricks.ServicePrincipal(
-    resource_name="serpr-heifer-databricks-adf",
-    application_id=HeiferConfig.DATABRICKS_SERVICE_PRINCIPAL_FOR_ADF_APP_UUID,
-    # external_id=heifer_adf.identity.apply(lambda _identity: _identity['principal_id']),
-    # acl_principal_id=heifer_adf.identity.apply(lambda _identity: _identity['principal_id']),
-    display_name=f"Service Principal of Heifer ADF",
-    allow_cluster_create=True,
-    allow_instance_pool_create=True,
-    workspace_access=True,
-
-    opts=pulumi.ResourceOptions(
-        depends_on=[heifer_private_endpoint_databricks_control_plane,
-                    heifer_private_endpoint_databricks_filesystem,
-                    heifer_databricks_workspace,
-                    heifer_databricks_provider],
-        provider=heifer_databricks_provider
-    ),
-)
-# ------------------------------------------
-
-
-# -- Allow to print info for configuration of Databricks Spark cluster --
-#   Warning: this is only for development and debugging purposes
-_print_spark_config_notes: bool = False
-if _print_spark_config_notes:
-    # You need to configure secrets in Pulumi.yaml file first
-    pulumi.export("Spark version", pulumi_databricks.get_spark_version(spark_version="3.4"))
-    pulumi.export(
-        "Node IDs",
-        pulumi_databricks.get_node_type(
-            category='General Purpose', min_memory_gb=1, photon_driver_capable=False,
-            photon_worker_capable=False
+    # -- Allow to print info for configuration of Databricks Spark cluster --
+    #   Warning: this is only for development and debugging purposes
+    _print_spark_config_notes: bool = False
+    if _print_spark_config_notes:
+        # You need to configure secrets in Pulumi.yaml file first
+        pulumi.export("Spark version", pulumi_databricks.get_spark_version(spark_version="3.4"))
+        pulumi.export(
+            "Node IDs",
+            pulumi_databricks.get_node_type(
+                category='General Purpose', min_memory_gb=1, photon_driver_capable=False,
+                photon_worker_capable=False
+            )
         )
-    )
-# -----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
 
 
-# -- Integration runtime between ADF and Databricks --
-heifer_adf_integration_runtime = pulumi_azure.datafactory.IntegrationRuntimeRule(
-    resource_name="heifer-adf-integration-runtime",
-    name="heifer-adf-integration-runtime",
-    data_factory_id=heifer_adf.id,
-    location=heifer_rg.location,
-    virtual_network_enabled=True,
-    opts=pulumi.ResourceOptions(
-        depends_on=[heifer_adf]
-    ),
-)
-# ----------------------------------------------------
-
-
-# -- Databricks Secret Scope --
-heifer_databricks_secret_scope = pulumi_databricks.SecretScope(
-    resource_name=HeiferConfig.DATABRICKS_SECRET_SCOPE_NAME,
-    name=HeiferConfig.DATABRICKS_SECRET_SCOPE_NAME,
-    opts=pulumi.ResourceOptions(
-        depends_on=[heifer_adf_integration_runtime,
-                    heifer_service_principal_adf],
-        provider=heifer_databricks_provider,
-    ),
-)
-# -----------------------------
-
-
-# -- Azure Data Factory Linked Service - Azure Databricks via MSI --
-heifer_link_adf_databricks = pulumi_azure.datafactory.LinkedServiceAzureDatabricks(
-    resource_name='link-service-heifer-databricks-and-adf',
-    name="HeiferAdfToCluster",
-    adb_domain=heifer_databricks_workspace.workspace_url.apply(
-        lambda _workspace_url: f'https://{_workspace_url}'
-    ),
-    msi_work_space_resource_id=heifer_databricks_workspace.id,
-    data_factory_id=heifer_adf.id,
-    new_cluster_config=pulumi_azure.datafactory.LinkedServiceAzureDatabricksNewClusterConfigArgs(
-        cluster_version=HeiferClusterConfiguration.CLUSTER_VERSION,
-        node_type=HeiferClusterConfiguration.NODE_TYPE,
-        log_destination=HeiferClusterConfiguration.LOG_DESTINATION,
-        max_number_of_workers=HeiferClusterConfiguration.MAX_NUMBER_OF_WORKERS,
-        min_number_of_workers=HeiferClusterConfiguration.MIN_NUMBER_OF_WORKERS,
-        spark_config=HeiferClusterConfiguration.SPARK_CONFIG | {
-            # A) MANDATORY: Connection to Data lake
-            f"fs.azure.account.auth.type.{HeiferConfig.STORAGE_ACCOUNT_NAME}.dfs.core.windows.net": "OAuth",  # noqa: E501
-            f"fs.azure.account.oauth.provider.type.{HeiferConfig.STORAGE_ACCOUNT_NAME}.dfs.core.windows.net": "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",  # noqa: E501
-            f"fs.azure.account.oauth2.client.id.{HeiferConfig.STORAGE_ACCOUNT_NAME}.dfs.core.windows.net": heifer_service_principal_for_databricks_storage_account.client_id.apply(lambda _client_id: _client_id),  # noqa: E501
-            f"fs.azure.account.oauth2.client.secret.{HeiferConfig.STORAGE_ACCOUNT_NAME}.dfs.core.windows.net": heifer_app_for_databricks_storage_account_password.value.apply(lambda _value: _value),  # noqa: E501
-            f"fs.azure.account.oauth2.client.endpoint.{HeiferConfig.STORAGE_ACCOUNT_NAME}.dfs.core.windows.net": f"https://login.microsoftonline.com/{CURRENT_CLIENT.tenant_id}/oauth2/token",  # noqa: E501
-            "spark.secret.datalake-uri": f"{HeiferConfig.STORAGE_ACCOUNT_NAME}.dfs.core.windows.net"  # noqa: E501
-        },
-    ),
-    opts=pulumi.ResourceOptions(
-        depends_on=[heifer_adf,
-                    heifer_private_endpoint_databricks_filesystem,
-                    heifer_databricks_workspace,
-                    heifer_service_principal_adf,
-                    heifer_perm_service_principal_can_contribute_storage,
-                    heifer_adf_serpr_role_assignment],
-        custom_timeouts=pulumi.CustomTimeouts(create="30m", update="30m", delete="30m"),
-    )
-)
-# ------------------------------------------------------------------
-
-
-# ==== DEPLOY PIPELINE TO UNZIP FILES ====
-if BakUnzipPipelineConfig.DEPLOY_PIPELINE:
-    heifer_bak_unzipped_linked_service = pulumi_azure.datafactory.LinkedServiceAzureBlobStorage(
-        resource_name="unzippedbakstrg",
-        name="unzippedbakstrg",
+    # -- Integration runtime between ADF and Databricks --
+    heifer_adf_integration_runtime = pulumi_azure.datafactory.IntegrationRuntimeRule(
+        resource_name="heifer-adf-integration-runtime",
+        name="heifer-adf-integration-runtime",
         data_factory_id=heifer_adf.id,
-        service_endpoint=f"https://{BakUnzipPipelineConfig.PRE_BRONZE_STORAGE_ACCOUNT}.blob.core.windows.net",  # noqa: E501
-        use_managed_identity=True,
+        location=heifer_rg.location,
+        virtual_network_enabled=True,
+        opts=pulumi.ResourceOptions(
+            depends_on=[heifer_adf]
+        ),
+    )
+    # ----------------------------------------------------
+
+
+    # -- Databricks Secret Scope --
+    heifer_databricks_secret_scope = pulumi_databricks.SecretScope(
+        resource_name=HeiferConfig.DATABRICKS_SECRET_SCOPE_NAME,
+        name=HeiferConfig.DATABRICKS_SECRET_SCOPE_NAME,
+        opts=pulumi.ResourceOptions(
+            depends_on=[heifer_adf_integration_runtime,
+                        heifer_service_principal_adf],
+            provider=heifer_databricks_provider,
+        ),
+    )
+    # -----------------------------
+
+
+    # -- Azure Data Factory Linked Service - Azure Databricks via MSI --
+    heifer_link_adf_databricks = pulumi_azure.datafactory.LinkedServiceAzureDatabricks(
+        resource_name='link-service-heifer-databricks-and-adf',
+        name="HeiferAdfToCluster",
+        adb_domain=heifer_databricks_workspace.workspace_url.apply(
+            lambda _workspace_url: f'https://{_workspace_url}'
+        ),
+        msi_work_space_resource_id=heifer_databricks_workspace.id,
+        data_factory_id=heifer_adf.id,
+        new_cluster_config=pulumi_azure.datafactory.LinkedServiceAzureDatabricksNewClusterConfigArgs(
+            cluster_version=HeiferClusterConfiguration.CLUSTER_VERSION,
+            node_type=HeiferClusterConfiguration.NODE_TYPE,
+            log_destination=HeiferClusterConfiguration.LOG_DESTINATION,
+            max_number_of_workers=HeiferClusterConfiguration.MAX_NUMBER_OF_WORKERS,
+            min_number_of_workers=HeiferClusterConfiguration.MIN_NUMBER_OF_WORKERS,
+            spark_config=HeiferClusterConfiguration.SPARK_CONFIG | {
+                # A) MANDATORY: Connection to Data lake
+                f"fs.azure.account.auth.type.{HeiferConfig.STORAGE_ACCOUNT_NAME}.dfs.core.windows.net": "OAuth",  # noqa: E501
+                f"fs.azure.account.oauth.provider.type.{HeiferConfig.STORAGE_ACCOUNT_NAME}.dfs.core.windows.net": "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",  # noqa: E501
+                f"fs.azure.account.oauth2.client.id.{HeiferConfig.STORAGE_ACCOUNT_NAME}.dfs.core.windows.net": heifer_service_principal_for_databricks_storage_account.client_id.apply(lambda _client_id: _client_id),  # noqa: E501
+                f"fs.azure.account.oauth2.client.secret.{HeiferConfig.STORAGE_ACCOUNT_NAME}.dfs.core.windows.net": heifer_app_for_databricks_storage_account_password.value.apply(lambda _value: _value),  # noqa: E501
+                f"fs.azure.account.oauth2.client.endpoint.{HeiferConfig.STORAGE_ACCOUNT_NAME}.dfs.core.windows.net": f"https://login.microsoftonline.com/{CURRENT_CLIENT.tenant_id}/oauth2/token",  # noqa: E501
+                "spark.secret.datalake-uri": f"{HeiferConfig.STORAGE_ACCOUNT_NAME}.dfs.core.windows.net"  # noqa: E501
+            },
+        ),
         opts=pulumi.ResourceOptions(
             depends_on=[heifer_adf,
                         heifer_private_endpoint_databricks_filesystem,
@@ -607,83 +585,107 @@ if BakUnzipPipelineConfig.DEPLOY_PIPELINE:
             custom_timeouts=pulumi.CustomTimeouts(create="30m", update="30m", delete="30m"),
         )
     )
+    # ------------------------------------------------------------------
 
-    heifer_bak_zipped_linked_service = pulumi_azure.datafactory.LinkedServiceAzureBlobStorage(
-        resource_name="zippedbakstrg",
-        name="zippedbakstrg",
-        data_factory_id=heifer_adf.id,
-        service_endpoint=f"https://{BakUnzipPipelineConfig.PRE_BRONZE_STORAGE_ACCOUNT}.blob.core.windows.net",  # noqa: E501
-        use_managed_identity=True,
-        opts=pulumi.ResourceOptions(
-            depends_on=[heifer_adf,
-                        heifer_private_endpoint_databricks_filesystem,
-                        heifer_databricks_workspace,
-                        heifer_service_principal_adf,
-                        heifer_perm_service_principal_can_contribute_storage,
-                        heifer_adf_serpr_role_assignment],
-            custom_timeouts=pulumi.CustomTimeouts(create="30m", update="30m", delete="30m"),
+
+    # ==== DEPLOY PIPELINE TO UNZIP FILES ====
+    if BakUnzipPipelineConfig.DEPLOY_PIPELINE or BakSerializationDistributionConfig.DEPLOY_PIPELINE:
+        heifer_bak_unzipped_linked_service = pulumi_azure.datafactory.LinkedServiceAzureBlobStorage(
+            resource_name="unzippedbakstrg",
+            name="unzippedbakstrg",
+            data_factory_id=heifer_adf.id,
+            service_endpoint=f"https://{BakUnzipPipelineConfig.PRE_BRONZE_STORAGE_ACCOUNT}.blob.core.windows.net",  # noqa: E501
+            use_managed_identity=True,
+            opts=pulumi.ResourceOptions(
+                depends_on=[heifer_adf,
+                            heifer_private_endpoint_databricks_filesystem,
+                            heifer_databricks_workspace,
+                            heifer_service_principal_adf,
+                            heifer_perm_service_principal_can_contribute_storage,
+                            heifer_adf_serpr_role_assignment],
+                custom_timeouts=pulumi.CustomTimeouts(create="30m", update="30m", delete="30m"),
+            )
         )
-    )
 
-    heifer_zipped_bak_dataset = pulumi_azure.datafactory.DatasetBinary(
-        resource_name="zippedbakds",
-        name="zippedbakds",
-        data_factory_id=heifer_adf.id,
-        linked_service_name=heifer_bak_zipped_linked_service.name,
-        azure_blob_storage_location=pulumi_azure.datafactory.DatasetBinaryAzureBlobStorageLocationArgs(  # noqa: E501
-            container=BakUnzipPipelineConfig.PRE_BRONZE_ZIPPED_BAK_DATASET_CONTAINER,
-            filename=BakUnzipPipelineConfig.PRE_BRONZE_ZIPPED_BAK_DATASET_FILE_NAME,
-        ),
-        compression=pulumi_azure.datafactory.DatasetBinaryCompressionArgs(
-            type="ZipDeflate"
+        heifer_bak_zipped_linked_service = pulumi_azure.datafactory.LinkedServiceAzureBlobStorage(
+            resource_name="zippedbakstrg",
+            name="zippedbakstrg",
+            data_factory_id=heifer_adf.id,
+            service_endpoint=f"https://{BakUnzipPipelineConfig.PRE_BRONZE_STORAGE_ACCOUNT}.blob.core.windows.net",  # noqa: E501
+            use_managed_identity=True,
+            opts=pulumi.ResourceOptions(
+                depends_on=[heifer_adf,
+                            heifer_private_endpoint_databricks_filesystem,
+                            heifer_databricks_workspace,
+                            heifer_service_principal_adf,
+                            heifer_perm_service_principal_can_contribute_storage,
+                            heifer_adf_serpr_role_assignment],
+                custom_timeouts=pulumi.CustomTimeouts(create="30m", update="30m", delete="30m"),
+            )
         )
-    )
 
-    heifer_unzipped_bak_dataset = pulumi_azure.datafactory.DatasetBinary(
-        resource_name="unzippedbakds",
-        name="unzippedbakds",
-        data_factory_id=heifer_adf.id,
-        linked_service_name=heifer_bak_unzipped_linked_service.name,
-        azure_blob_storage_location=pulumi_azure.datafactory.DatasetBinaryAzureBlobStorageLocationArgs(  # noqa: E501
-            container=BakUnzipPipelineConfig.PRE_BRONZE_UNZIPPED_BAK_DATASET_CONTAINER,
-            path=BakUnzipPipelineConfig.PRE_BRONZE_UNZIPPED_BAK_DATASET_FOLDER_PATH,
-        ),
-    )
-# ----------------------------------------
+        heifer_zipped_bak_dataset = pulumi_azure.datafactory.DatasetBinary(
+            resource_name="zippedbakds",
+            name="zippedbakds",
+            data_factory_id=heifer_adf.id,
+            linked_service_name=heifer_bak_zipped_linked_service.name,
+            azure_blob_storage_location=pulumi_azure.datafactory.DatasetBinaryAzureBlobStorageLocationArgs(  # noqa: E501
+                container=BakUnzipPipelineConfig.PRE_BRONZE_ZIPPED_BAK_DATASET_CONTAINER,
+                filename=BakUnzipPipelineConfig.PRE_BRONZE_ZIPPED_BAK_DATASET_FILE_NAME,
+            ),
+            compression=pulumi_azure.datafactory.DatasetBinaryCompressionArgs(
+                type="ZipDeflate"
+            )
+        )
+
+        heifer_unzipped_bak_dataset = pulumi_azure.datafactory.DatasetBinary(
+            resource_name="unzippedbakds",
+            name="unzippedbakds",
+            data_factory_id=heifer_adf.id,
+            linked_service_name=heifer_bak_unzipped_linked_service.name,
+            azure_blob_storage_location=pulumi_azure.datafactory.DatasetBinaryAzureBlobStorageLocationArgs(  # noqa: E501
+                container=BakUnzipPipelineConfig.PRE_BRONZE_UNZIPPED_BAK_DATASET_CONTAINER,
+                path=BakUnzipPipelineConfig.PRE_BRONZE_UNZIPPED_BAK_DATASET_FOLDER_PATH,
+            ),
+        )
+    # ----------------------------------------
 
 
-# ====== DATA FACTORY AND PIPELINE PROVISIONING ======
-# -- Deploy all available pipelines --
-heifer_adf_pipeline_dependencies = [heifer_200_seconds_break, heifer_link_adf_databricks]
-if BakUnzipPipelineConfig.DEPLOY_PIPELINE:
-    heifer_adf_pipeline_dependencies.append(heifer_zipped_bak_dataset)
-    heifer_adf_pipeline_dependencies.append(heifer_unzipped_bak_dataset)
+    # ====== DATA FACTORY AND PIPELINE PROVISIONING ======
+    # -- Deploy all available pipelines --
+    heifer_adf_pipeline_dependencies = [heifer_200_seconds_break, heifer_link_adf_databricks]
+    if BakUnzipPipelineConfig.DEPLOY_PIPELINE or BakSerializationDistributionConfig.DEPLOY_PIPELINE:
+        heifer_adf_pipeline_dependencies.append(heifer_zipped_bak_dataset)
+        heifer_adf_pipeline_dependencies.append(heifer_unzipped_bak_dataset)
 
-for _pipeline_definition in pipelines_definitions:
-    if (
-            not BakUnzipPipelineConfig.DEPLOY_PIPELINE
-            and _pipeline_definition['name'] == BakUnzipPipelineConfig.PIPELINE_NAME
-    ) or (
-            not RioPipelineConfig.DEPLOY_PIPELINE
-            and _pipeline_definition['name'] == RioPipelineConfig.PIPELINE_NAME
-    ) or (
-            not DatasetProvisioningPipelineConfig.DEPLOY_PIPELINE
-            and _pipeline_definition['name'] == DatasetProvisioningPipelineConfig.PIPELINE_NAME
-    ):
-        # Skip BAK ingestion pipeline if not required
-        continue
+    for _pipeline_definition in pipelines_definitions:
+        if (
+                not BakUnzipPipelineConfig.DEPLOY_PIPELINE
+                and _pipeline_definition['name'] == BakUnzipPipelineConfig.PIPELINE_NAME
+        ) or (
+                not RioPipelineConfig.DEPLOY_PIPELINE
+                and _pipeline_definition['name'] == RioPipelineConfig.PIPELINE_NAME
+        ) or (
+                not DatasetProvisioningPipelineConfig.DEPLOY_PIPELINE
+                and _pipeline_definition['name'] == DatasetProvisioningPipelineConfig.PIPELINE_NAME
+        ) or (
+                not BakSerializationDistributionConfig.DEPLOY_PIPELINE
+                and _pipeline_definition['name'] == BakSerializationDistributionConfig.PIPELINE_NAME
+        ):
+            # Skip BAK ingestion pipeline if not required
+            continue
 
-    heifer_adf_pipeline = pulumi_azure.datafactory.Pipeline(
-        resource_name=f"heifer-adf-pipeline-{_pipeline_definition['name']}",
-        name=_pipeline_definition['name'],
-        data_factory_id=heifer_adf.id,
-        activities_json=json.dumps(_pipeline_definition['properties']['activities']),
-        parameters={
-            # Mapping: parameter_name -> default value
-            _pipeline_parameter_name: _pipeline_parameter_definition['defaultValue']
-            for _pipeline_parameter_name, _pipeline_parameter_definition in
-            _pipeline_definition['properties']['parameters'].items()
-        },
-        opts=pulumi.ResourceOptions(depends_on=heifer_adf_pipeline_dependencies),
-    )
-# ------------------------------------
+        heifer_adf_pipeline = pulumi_azure.datafactory.Pipeline(
+            resource_name=f"heifer-adf-pipeline-{_pipeline_definition['name']}",
+            name=_pipeline_definition['name'],
+            data_factory_id=heifer_adf.id,
+            activities_json=json.dumps(_pipeline_definition['properties']['activities']),
+            parameters={
+                # Mapping: parameter_name -> default value
+                _pipeline_parameter_name: _pipeline_parameter_definition['defaultValue']
+                for _pipeline_parameter_name, _pipeline_parameter_definition in
+                _pipeline_definition['properties']['parameters'].items()
+            },
+            opts=pulumi.ResourceOptions(depends_on=heifer_adf_pipeline_dependencies),
+        )
+    # ------------------------------------

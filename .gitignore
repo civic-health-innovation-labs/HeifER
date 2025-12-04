@@ -3,3 +3,6 @@ venv/
 .secrets
 pipelines/*
 infrastructure/Pulumi.*.yaml
+infrastructure/env-script.sh
+infrastructure/env-script-*.sh
+devel/*
