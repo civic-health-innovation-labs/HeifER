@@ -2,9 +2,10 @@ import os
 from typing import Optional, Any
 import pathlib
 
-from config_rio import RioPipelineConfig
-from config_bak_unzip_pipeline import BakUnzipPipelineConfig
-from config_dataset_provisioning import DatasetProvisioningPipelineConfig
+from .config_rio import RioPipelineConfig
+from .config_bak_unzip_pipeline import BakUnzipPipelineConfig
+from .config_dataset_provisioning import DatasetProvisioningPipelineConfig
+from .config_bak_serialization_distribution import BakSerializationDistributionConfig
 
 
 # ======= CONFIGURATION =======
@@ -57,7 +58,8 @@ class HeiferConfig:
         "databricks_container_subnet": f"{os.getenv('HEIFER_VIRTUAL_NETWORK_ADDRESS_SPACE_PREFIX')}.2.0/24",  # noqa: E501
     }
     # Path to directory with pipelines from inside Docker (DO NOT CHANGE UNLESS YOU KNOW)
-    PATH_TO_PIPELINES: pathlib.Path = pathlib.Path("../pipelines")
+    #   Note: this is relevant only if the docker compose logic is not used.
+    PATH_TO_PIPELINES: pathlib.Path = pathlib.Path(os.getenv("HEIFER_PATH_TO_PIPELINES", default=r"../../pipelines"))
     # This is the relative path to folder which content is upload as files to DBFS.
     #   (DO NOT CHANGE UNLESS YOU KNOW)
     PATH_TO_PIPELINES_UPLOAD_FOLDER: pathlib.Path = pathlib.Path("artifacts")
@@ -126,4 +128,8 @@ https://www.pulumi.com/registry/packages/azure/api-docs/datafactory/linkedservic
         "spark.secret.managed-instance-app-tenant": BakUnzipPipelineConfig.SQL_MI_APP_TENANT,  # noqa: E501
         "spark.secret.managed-instance-app-client-id": BakUnzipPipelineConfig.SQL_MI_APP_CLIENT_ID,  # noqa: E501
         "spark.secret.managed-instance-app-client-secret": BakUnzipPipelineConfig.SQL_MI_APP_CLIENT_SECRET,  # noqa: E501
+        
+        "spark.secret.serialization-temp-account-name": HeiferConfig.STORAGE_ACCOUNT_NAME,  # noqa: E501
+        "spark.secret.serialization-temp-account-container": BakSerializationDistributionConfig.TEMP_ACCOUNT_CONTAINER,  # noqa: E501
+        "spark.secret.serialization-destination-urls": BakSerializationDistributionConfig.TARGET_STORAGE_ACCOUNTS_URLS,  # noqa: E501
     }
